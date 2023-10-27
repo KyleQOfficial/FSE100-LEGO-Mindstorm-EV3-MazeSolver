@@ -27,16 +27,15 @@ while true
     distanceReading = brick.UltrasonicDist(2);
     if (distanceReading < 0) || (distanceReading >= 255)
         disp("ERROR - Distance Sensor Reading: " + distanceReading);
-        continue;
     end
 
-    % this is a whole thing lmao
+    % colorFunction() checks and does all the color stuff, if a color
+    % is found, then it returns true
     if colorFunction(brick)
         % save new distance to wall after turn
         lastDist = brick.UltrasonicDist(2);
         % continue forward
         moveForward(brick);
-        continue;
     end
 
     % if front touch sensor is hitting wall
@@ -55,7 +54,6 @@ while true
         lastDist = brick.UltrasonicDist(2);
         % continue forward
         moveForward(brick);
-        continue;
     end
     
     % if there is a hole in the wall
@@ -74,34 +72,38 @@ while true
             lastDist = brick.UltrasonicDist(2);
             % continue forward
             moveForward(brick);
-            continue;
         end
     end
 
+    % OLD CORRECTION
     % note to possibly add code to make robot drift toward center of path
     % only add if robot get caught too close to wall
 
     % apply adjustment so robot does not drift into wall
     % only run once every 0.25 seconds for faster runtime
-    timeDifference = toc(clock) - time2;
-    if timeDifference > 0.25
-        % get the drift rate of change to tell which direction it is
-        % drifting in
-        driftROC = (brick.UltrasonicDist(2) - lastDist) / timeDifference;
-        disp("DriftROC: " + driftROC);
-        if driftROC > 0
-            disp("Drifting Right");
-            brick.MoveMotor('A', -speed * 0.9);
-        else
-            disp("Drifting Left");
-            brick.MoveMotor('D', -speed * 0.9);
-        end
-        pause(0.25 * abs(driftROC));
-        time2 = toc(clock);
-    end
+    % disp("Distance: " + brick.UltrasonicDist(2));
+    % if brick.UltrasonicDist(2) < 38
+    %     timeDifference = toc(clock) - time2;
+    %     if timeDifference > 0.25
+    %         % get the drift rate of change to tell which direction it is
+    %         % drifting in
+    %         driftROC = (brick.UltrasonicDist(2) - lastDist) / timeDifference;
+    %         disp("DriftROC: " + driftROC);
+    %         if driftROC > 0
+    %             disp("Drifting Right");
+    %             brick.MoveMotor('A', -speed * 0.9);
+    %         else
+    %             disp("Drifting Left");
+    %             brick.MoveMotor('D', -speed * 0.9);
+    %         end
+    %         pause(0.2);
+    %         time2 = toc(clock);
+    %         lastDist = brick.UltrasonicDist(2);
+    %     end
+    % end
 
     loopEndTime = toc(clock);
-    disp("Main Loop Execution Time: " + (loopEndTime - loopStartTime) + " seconds");
+    %disp("Main Loop Execution Time: " + (loopEndTime - loopStartTime) + " seconds");
     pause(0.01)
 end
 
@@ -133,7 +135,7 @@ end
 function nudgeBack(brick)
     % apparently motor A was 65% weaker than motor D at the time
     % we should double check this
-    brick.MoveMotor('A', 100 * 0.65);
+    brick.MoveMotor('A', 100);
     brick.MoveMotor('D', 100);
     pause(0.35)
     brick.StopAllMotors(1);
@@ -141,61 +143,64 @@ end
 
 % crunched turnAutoLeft() and turnAutoRight() into a single function
 function turnAuto(brick, clock, direction)
+    disp("Started turning " + direction);
     % the left and right motor powers are not -100 and 100 for turning
     % because through some testing it seemed about 60% power on the inner
     % motor created a smoother, more stable turn
     % we can futher test this however as our robot design has changed
     switch (direction)
         case 'right'
-            APower = -100;
-            DPower = 60;
+            APower = -75;
+            DPower = 75;
+            timeSleep = 0;
         case 'left'
-            APower = 60;
-            DPower = -100;
+            APower = 75;
+            DPower = -75;
+            timeSleep = 1.2;
     end
 
     % inside a try/catch statement in case of error, robot will continue to
     % function
-    try
-        startAngle = brick.GyroAngle(1);
-        brick.MoveMotor('A', APower);
-        brick.MoveMotor('D', DPower);
-
-        time1 = toc(clock);
-
-        currentAngle = startAngle - brick.GyroAngle(1); 
-        while currentAngle < 90
-            % Apply gradual slowdown as we approach goal, results in a more
-            % accurate final turn
-
-            if angleDiff > 45 % only apply when halfway through turn (full speed for first half)
-                temp = (1 - (angleDiff / 90))*2; % transforms angle range (45-90 degrees) to this range (1.0-0.5)
-                brick.MoveMotor('A', APower * temp);
-                brick.MoveMotor('D', DPower * temp);
+    startAngle = brick.GyroAngle(1);
+    angle1 = startAngle;
+    brick.MoveMotor('A', APower);
+    brick.MoveMotor('D', DPower);
+    time1 = toc(clock);
+    currentAngle = abs(startAngle - brick.GyroAngle(1)); 
+    while currentAngle < 90
+        % Apply gradual slowdown as we approach goal, results in a more
+        % accurate final
+        temp = max(1 - (currentAngle / 90), 0.25); % transforms angle range (0-90 degrees) to this range (1.0-0.5)
+        disp(temp);
+        brick.MoveMotor('A', APower * temp);
+        brick.MoveMotor('D', DPower * temp);
+        % this is the part that checks if robot is stuck during turn
+        % if change in time since last execution is > than 1 second
+        % speeds up code by checking less often
+        timeDiff2 = toc(clock) - time1;
+        if timeDiff2 > 1
+            angle2 = brick.GyroAngle(1);
+            if abs(angle1 - angle2) < 1
+                disp("Possibly Stuck, Attempting Unstuck")
+                brick.StopAllMotors(0);
+                pause(0.1)
+                brick.MoveMotor('A', APower);
+                brick.MoveMotor('D', DPower);
             end
-
-            % this is the part that checks if robot is stuck during turn
-            % if change in time since last execution is > than 1 second
-            % speeds up code by checking less often
-            timeDiff2 = toc(clock) - time1;
-            if timeDiff2 > 1
-                angle2 = brick.GyroAngle(1);
-                if abs(angle1 - angle2) < 1
-                    disp("Possibly Stuck, Attempting Unstuck")
-                    brick.StopAllMotors(0);
-                    pause(0.1)
-                    brick.MoveMotor('A', APower);
-                    brick.MoveMotor('D', DPower);
-                end
-                angle1 = angle2;
-                time1 = toc(clock);
-            end
+            angle1 = angle2;
+            time1 = toc(clock);
         end
-        % turn is now completed
-        brick.StopAllMotors(1);
-    catch 
-        disp("ERROR IN turnAuto() Function");
+        currentAngle = abs(startAngle - brick.GyroAngle(1)); 
     end
+    % turn is now completed
+    brick.StopAllMotors(1);
+    %catch 
+    %    disp("ERROR IN turnAuto() Function");
+    %end
+    disp("Finished turning");
+
+    moveForward(brick);
+    pause(timeSleep);
 end
 
 % returns variable result, which is true is touch sensor is pushed
@@ -234,7 +239,10 @@ function success = colorFunction(brick)
 
     function moveUntilNotOnColor(brick, color)
         moveForward(brick);
-        while getColor(brick) == color
+        temp = getColor(brick);
+        disp(temp);
+        while strcmp(temp, color)
+            temp = getColor(brick);
             pause(0.01);
         end
     end
@@ -244,15 +252,15 @@ function success = colorFunction(brick)
             disp("Stop Detected")
             brick.StopAllMotors(1);
             pause(3);
-            moveUntilNotOnColor(brick, 'red')
+            moveUntilNotOnColor(brick, 'red');
             success = true;
         case 'blue'
             disp("Blue Detected")
             brick.StopAllMotors(1);
 
-            brick.playTone(200, 0.3);
-            pause(0.3);
-            brick.playTone(200, 0.3);
+            brick.beep(1);
+            pause(1);
+            brick.beep(1);
 
             moveUntilNotOnColor(brick, 'blue');
             success = true;
@@ -260,11 +268,11 @@ function success = colorFunction(brick)
             disp("Green Detected")
             brick.StopAllMotors(1);
 
-            brick.playTone(200, 0.3);
-            pause(0.3);
-            brick.playTone(200, 0.3);
-            pause(0.3);
-            brick.playTone(200, 0.3);
+            brick.beep(1);
+            pause(1);
+            brick.beep(1);
+            pause(1);
+            brick.beep(1);
 
             moveUntilNotOnColor(brick, 'green');
             success = true;
@@ -314,9 +322,9 @@ function manualMode(brick)
             case 'd'
                 turnRight(brick);
             case 'f'
-                brick.MoveMotor('B', 30);
+                brick.MoveMotor('B', 20);
             case 'g'
-                brick.MoveMotor('B', -30);
+                brick.MoveMotor('B', -20);
             case 'q'
                 disp("QUITING KEY INPUT AND ENTERING AUTO");
                 doKeyInput = false;
