@@ -29,8 +29,8 @@ while true
         disp("ERROR - Distance Sensor Reading: " + distanceReading);
     end
 
-    % colorFunction() checks and does all the color stuff, if a color
-    % is found, then it returns true
+    % colorFunction() checks and does all the color stuff,
+    % if a color is found, then it returns true and runs the following code
     if colorFunction(brick)
         % save new distance to wall after turn
         lastDist = brick.UltrasonicDist(2);
@@ -133,21 +133,29 @@ end
 
 % slightly move backwards after turns
 function nudgeBack(brick)
-    % apparently motor A was 65% weaker than motor D at the time
-    % we should double check this
     brick.MoveMotor('A', 100);
     brick.MoveMotor('D', 100);
     pause(0.35)
     brick.StopAllMotors(1);
 end
 
+% returns variable result, which is true is touch sensor is pushed
+function result = isTouching(brick)
+    result = false;
+    try
+        if brick.TouchPressed(3) == 1
+            result = true;
+        end
+    catch
+        disp("ERROR IN isTouching() Function");
+    end
+end
+
 % crunched turnAutoLeft() and turnAutoRight() into a single function
 function turnAuto(brick, clock, direction)
     disp("Started turning " + direction);
-    % the left and right motor powers are not -100 and 100 for turning
-    % because through some testing it seemed about 60% power on the inner
-    % motor created a smoother, more stable turn
-    % we can futher test this however as our robot design has changed
+
+    % assign variables/values according to turn direction
     switch (direction)
         case 'right'
             APower = -75;
@@ -159,21 +167,18 @@ function turnAuto(brick, clock, direction)
             timeSleep = 1.2;
     end
 
-    % inside a try/catch statement in case of error, robot will continue to
-    % function
-    startAngle = brick.GyroAngle(1);
-    angle1 = startAngle;
-    brick.MoveMotor('A', APower);
-    brick.MoveMotor('D', DPower);
+    angle1 = brick.GyroAngle(1);
     time1 = toc(clock);
-    currentAngle = abs(startAngle - brick.GyroAngle(1)); 
+    currentAngle = abs(angle1 - brick.GyroAngle(1)); 
+
     while currentAngle < 90
-        % Apply gradual slowdown as we approach goal, results in a more
-        % accurate final
-        temp = max(1 - (currentAngle / 90), 0.25); % transforms angle range (0-90 degrees) to this range (1.0-0.5)
+        % Apply gradual slowdown as we approach goal, prevents overshooting
+        temp = max(1 - (currentAngle / 90), 0.25); % transforms angle range (0-90 degrees) to this range (1.0-0.25)
         disp(temp);
+
         brick.MoveMotor('A', APower * temp);
         brick.MoveMotor('D', DPower * temp);
+
         % this is the part that checks if robot is stuck during turn
         % if change in time since last execution is > than 1 second
         % speeds up code by checking less often
@@ -190,29 +195,16 @@ function turnAuto(brick, clock, direction)
             angle1 = angle2;
             time1 = toc(clock);
         end
+
         currentAngle = abs(startAngle - brick.GyroAngle(1)); 
     end
-    % turn is now completed
-    brick.StopAllMotors(1);
-    %catch 
-    %    disp("ERROR IN turnAuto() Function");
-    %end
+
+    brick.StopAllMotors(0);
+    pause(0.2);
     disp("Finished turning");
 
     moveForward(brick);
     pause(timeSleep);
-end
-
-% returns variable result, which is true is touch sensor is pushed
-function result = isTouching(brick)
-    result = false;
-    try
-        if brick.TouchPressed(3) == 1
-            result = true;
-        end
-    catch
-        disp("ERROR IN isTouching() Function");
-    end
 end
 
 function success = colorFunction(brick)
@@ -282,7 +274,7 @@ end
 function brick = initBrick(brick)
     clc;
     clear color_rgb;
-    clear distance;
+    clear distanceReading;
     clear lastDist;
     clear timeDifference;
     clear clock;
