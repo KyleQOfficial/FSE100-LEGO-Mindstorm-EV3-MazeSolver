@@ -7,6 +7,9 @@ doKeyInput = false;
 % TODO LIST
 % minor color detection improvements should be made
 % slight tweeking to power curves and correction in general
+% correctWithWall function can be made smaller
+% code in general should be refactored (made faster, improved functions,
+% tidy up code) <-- last step
 
 % reconnect, configure, and initialize brick
 brick = initBrick(brick);
