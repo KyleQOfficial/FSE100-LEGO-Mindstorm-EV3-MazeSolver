@@ -5,9 +5,9 @@ speed = 75;
 doKeyInput = true;
 
 % TODO LIST
-% implement stuck check?
+% Currently works quite well, given enough time, it will always complete the maze
 % code in general should be refactored (made faster, improved functions, tidy up code) <-- last step
-% experiment with lowering all pauses
+% experiment with lowering all pauses <-- last step
 
 brick = initBrick(brick); % reconnect, configure, and initialize brick/sensors
 clock = tic; % start clock
@@ -22,9 +22,6 @@ time = toc(clock); % get current time
 firstAngle = brick.GyroAngle(1); % get starting angle
 moveForward(brick); % start moving
 
-stuckTotal = 0;
-stuckCount = 0;
-
 % main loop starts here
 while true
 
@@ -35,12 +32,13 @@ while true
         moveForward(brick);
     end
 
-    %distanceReading = brick.UltrasonicDist(2);
+    distanceReading = brick.UltrasonicDist(2);
     if (distanceReading < 0) || (distanceReading >= 255)
         disp("ERROR - Distance Sensor Reading: " + distanceReading);
         stopRobot(brick, speed);
         nudgeBack(brick);
         pause(5);
+        moveForward(brick);
         continue;
     end
 
@@ -57,42 +55,23 @@ while true
     end
 
     % correction based on gyro angle
-    if toc(clock) - time > 0.25
-        
-        angleDifference = firstAngle - brick.GyroAngle(1);
-        %disp("Angle Diff: " + angleDifference);
+    %if toc(clock) - time > 0.25
+    %    
+    %    angleDifference = firstAngle - brick.GyroAngle(1);
+    %    %disp("Angle Diff: " + angleDifference);
+    %
+    %    if  angleDifference < 0
+    %        disp("Bot is Drifting Right");
+    %        brick.MoveMotor('A', -(speed-2));
+    %    elseif angleDifference > 0
+    %        disp("Bot is Drifting Left");
+    %        brick.MoveMotor('D', -(speed-2));
+    %    end
+%
+    %    time = toc(clock);
+    %end
     
-        if  angleDifference < 0
-            %disp("Drifting Right");
-            brick.MoveMotor('A', -(speed-2));
-        elseif angleDifference > 0
-            %disp("Drifting Left");
-            brick.MoveMotor('D', -(speed-2));
-        else
-            continue;
-        end
-        
-        disp(brick.GyroRate(1));
-        temp = abs(brick.GyroRate(1));
-        disp(temp);
-        if temp < 5
-            %stuckTotal = stuckTotal + temp;
-            stuckCount = stuckCount + 1;
-        else
-            stuckCount = 0;
-        end
-
-        time = toc(clock);
-    end
-
-    if stuckCount > 10
-        disp("STUCK?");
-        brick.StopAllMotors(1);
-        pause(3);
-        nudgeBack(brick);
-    end
-    
-    loopEndTime = toc(clock);
+    %loopEndTime = toc(clock);
     %disp("Main Loop Execution Time: " + (loopEndTime - loopStartTime) + " seconds");
     pause(0.001)
 end
@@ -100,8 +79,8 @@ end
 % base movement functions
 function moveForward(brick)
     global speed;
-    brick.MoveMotor('A', -speed);
     brick.MoveMotor('D', -speed);
+    brick.MoveMotor('A', -speed * 0.98);
 end
 
 function moveUltimate(brick, clock, speed, driveTime)
@@ -110,7 +89,12 @@ function moveUltimate(brick, clock, speed, driveTime)
     brick.MoveMotor('D', speed);
     brick.MoveMotor('A', speed);
 
-    startTime = toc(clock);
+    try
+        startTime = toc(clock);
+    catch
+        disp("ERROR");
+        startTime = toc(clock);
+    end
 
     while timeDiff < driveTime
         colorFunction(brick, clock);
@@ -122,7 +106,7 @@ end
 
 % (1) experimental braking using gradual slowdown at first, (2) then applying full
 % break force, (3) then relaxing motors so they are not under tension.
-% helps reduce "jumping" when instantly applying full break force
+% helps reduce "jumping" when compared to instantly applying full break force
 function stopRobot(brick, lspeed)
     %brick.playTone(100, 500, 50);
     % (1)
@@ -168,9 +152,8 @@ end
 function nudgeBack(brick)
     brick.MoveMotor('A', 100 * 0.95); % less power on left motor because it seemed stronger at the time
     brick.MoveMotor('D', 100);
-    pause(0.2); % TIME
+    pause(0.1); % TIME
     stopRobot(brick, 100);
-    pause(0.2);
 end
 
 % (1) if touch sensor is detected as pressed, (2) instantly stop robot
@@ -180,11 +163,9 @@ function success = touchFunction(brick, clock, firstAngle)
     success = false;
     if brick.TouchPressed(3) == 1 % (1)
         brick.StopAllMotors(1); % (2)
-        pause(0.1); % waiting for breaking to take full effect
         nudgeBack(brick); % (3)
         turnAuto(brick, clock, 'right', firstAngle); % (4)
-        pause(0.2);
-        correctWithWall(brick); % (5)
+        correctWithWall(brick, clock); % (5)
 
         success = true;
     end
@@ -210,7 +191,7 @@ function success = holeFunction(brick, clock, distanceReading)
             pause(0.2);
             turnAuto(brick, clock, 'left', firstAngle);
             pause(0.2);
-            correctWithWall(brick);
+            correctWithWall(brick, clock);
             success = true;
         end
     end
@@ -234,7 +215,7 @@ function turnAuto(brick, clock, direction, startAngle)
     time1 = toc(clock);
     currentAngle = abs(angle1 - brick.GyroAngle(1));
 
-    while currentAngle < 85
+    while currentAngle < 88
         disp(currentAngle);
 
         % Apply gradual slowdown as we approach goal, prevents overshooting
@@ -242,10 +223,9 @@ function turnAuto(brick, clock, direction, startAngle)
 
         brick.MoveMotor('A', APower * temp);
         brick.MoveMotor('D', DPower * temp);
-
+    
         % this is the part that checks if robot is stuck during turn
-        % if change in time since last execution is > than 1 second
-        % speeds up code by checking less often
+        % if change in time since last execution is > than 1 second, speeds up code by checking less often
         timeDiff = toc(clock) - time1;
         if timeDiff > 1
             angle2 = brick.GyroAngle(1);
@@ -269,9 +249,9 @@ function turnAuto(brick, clock, direction, startAngle)
     pause(0.1);
     disp("Finished turning");
     
-    % only need to do a few things after LEFT turn only
+    % move forward after LEFT turn only
     if strcmp(direction, 'left')
-        moveUltimate(brick, clock, -50, 2.5); % FIX TIMES
+        moveUltimate(brick, clock, -75, 1.2); % FIX TIMES
     end
 
 end
@@ -304,7 +284,7 @@ function success = colorFunction(brick, clock)
         end
         stopRobot(brick, speed);
     end
-
+ 
     color = getColor(brick);
     disp("Color Code: " + color)
     if color == 2 || color == 3 || color == 5 || color == 4
@@ -321,6 +301,14 @@ end
 function brick = initBrick(brick)
     clc;
     % add variables to clear
+    clear clock;
+    clear count;
+    clear distanceReading;
+    clear firstAngle;
+    clear loopEndTime;
+    clear loopStartTime;
+    clear temp;
+    clear time;
     
     % reconnect brick at start because sensors go wacky a lot
     try
@@ -371,7 +359,7 @@ end
 
 % this function will be run after turning to ensure robot is mostly
 % straight
-function correctWithWall(brick)
+function correctWithWall(brick, clock)
     global speed;
 
     % function to get readings because it has to double check and its kinda
@@ -381,6 +369,10 @@ function correctWithWall(brick)
         stopRobot(brick, lspeed);
         pause(0.25);
         distance = brick.UltrasonicDist(2);
+        pause(0.1);
+        distance = distance + brick.UltrasonicDist(2);
+        pause(0.1);
+        distance = (distance + brick.UltrasonicDist(2)) / 3;
         pause(0.25);
         if abs(distance - brick.UltrasonicDist(2)) > 1
             disp("ERROR BETWEEN READINGS OFF BY MORE THAN ERROR ALLOWED");
@@ -403,13 +395,19 @@ function correctWithWall(brick)
         brick.MoveMotor('D', power);
     end
 
+    badReadingCount = 0;
     count = 1;
+    isCorrectCount = 0;
     firstTurn = 'none';
 
-    while true
+    while (count < 4) && (isCorrectCount < 2)
 
-        if count > 6
-            break;
+        if badReadingCount > 2
+            disp("PROBS STUCK");
+            brick.StopAllMotors(0);
+            nudgeBack(brick);
+            moveUltimate(brick, clock, -100, 1);
+            badReadingCount = 0;
         end
 
         % get first reading
@@ -423,24 +421,30 @@ function correctWithWall(brick)
         
         % compare the two readings
         difference = firstReading - secondReading;
-        
+        disp("Difference: " + difference);
         % if the difference is greater than 10 then something most likely
         % went wrong because the robot does not move enough for it to be
         % this high of a value
         if abs(difference) > 5
+            badReadingCount = badReadingCount + 1;
             disp("BAD DISTANCE READING");
             continue;
         end
-
+        
         % calculate proper power to turn robot in proper direction,
         % lower starting power that decreases every correction
-        power = max(35 - (count*5), 15);
+        power = max(30 - (count*2), 10);
         disp("Power: " + power);
 
-        if difference < 0
+        if difference < 0.1
             leftCorrect();
-        else
+            isCorrectCount = 0;
+        elseif difference > 0.1
             rightCorrect();
+            isCorrectCount = 0;
+        else
+            disp("Current Angle: " + brick.GyroAngle(1));
+            isCorrectCount = isCorrectCount + 1;
         end
         
         pause(0.1);
@@ -449,31 +453,36 @@ function correctWithWall(brick)
 
         firstReading = getDistance(0);
 
-        brick.MoveMotor('A', 29);
+        brick.MoveMotor('A', 30);
         brick.MoveMotor('D', 30);
         pause(0.5);
 
         secondReading = getDistance(30);
 
         difference = firstReading - secondReading;
-        
+        disp("Difference: " + difference);
         if abs(difference) > 5
+            badReadingCount = badReadingCount + 1;
             disp("BAD DISTANCE READING");
             continue;
         end
 
-        if difference > 0
+        if difference > 0.1
             leftCorrect();
-        else
+            isCorrectCount = 0;
+        elseif difference < 0.1
             rightCorrect();
+            isCorrectCount = 0;
+        else
+            disp("Current Angle: " + brick.GyroAngle(1));
+            isCorrectCount = isCorrectCount + 1;
         end
         
         pause(0.1);
         brick.StopAllMotors(0);
         pause(0.2);
 
-        disp("Difference: " + difference);
         count = count + 1;
-
+        
     end
 end
